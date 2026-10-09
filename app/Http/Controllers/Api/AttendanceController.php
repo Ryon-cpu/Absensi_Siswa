@@ -1,15 +1,19 @@
 <?php
+
 namespace App\Http\Controllers\Api;
+
 use App\Http\Controllers\Controller;
 use App\Models\Attendance;
 use App\Models\Student;
 use App\Models\User;
+use App\Services\AttendanceNotificationService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
+
 class AttendanceController extends Controller
 {
     public function index(Request $request): JsonResponse
@@ -30,11 +34,13 @@ class AttendanceController extends Controller
             ->when(isset($filters['student_id']), fn ($query) => $query->where('student_id', $filters['student_id']))
             ->when(isset($filters['status']), fn ($query) => $query->where('status', $filters['status']));
         $this->scopeToUser($query, $request->user());
+
         return response()->json([
             'data' => $query->orderByDesc('date')->orderBy('student_id')->paginate(15)->withQueryString(),
         ]);
     }
-    public function store(Request $request): JsonResponse
+
+    public function store(Request $request, AttendanceNotificationService $notifications): JsonResponse
     {
         $user = $request->user();
         abort_unless(in_array($user->role, ['admin', 'guru'], true), Response::HTTP_FORBIDDEN);
@@ -60,14 +66,18 @@ class AttendanceController extends Controller
                 'student_id' => ['Absensi siswa untuk tanggal tersebut sudah tercatat.'],
             ]);
         }
+        $notifications->queueFor($attendance);
+
         return response()->json([
             'message' => 'Absensi berhasil dicatat.',
             'data' => $attendance->load(['student:id,class_id,student_number,name', 'recorder:id,name']),
         ], Response::HTTP_CREATED);
     }
+
     public function show(Request $request, Attendance $attendance): JsonResponse
     {
         $this->authorizeAttendanceAccess($request->user(), $attendance);
+
         return response()->json([
             'data' => $attendance->load([
                 'student:id,class_id,student_number,name',
@@ -76,26 +86,38 @@ class AttendanceController extends Controller
             ]),
         ]);
     }
-    public function update(Request $request, Attendance $attendance): JsonResponse
-    {
+
+    public function update(
+        Request $request,
+        Attendance $attendance,
+        AttendanceNotificationService $notifications,
+    ): JsonResponse {
         abort_unless(in_array($request->user()->role, ['admin', 'guru'], true), Response::HTTP_FORBIDDEN);
         $this->authorizeAttendanceAccess($request->user(), $attendance);
         $validated = $request->validate([
             'status' => ['required', 'in:hadir,izin,sakit,alpa'],
         ]);
+        $previousStatus = $attendance->status;
         $attendance->update($validated);
+        if ($previousStatus !== $attendance->status) {
+            $notifications->queueFor($attendance);
+        }
+
         return response()->json([
             'message' => 'Absensi berhasil diperbarui.',
             'data' => $attendance->refresh()->load(['student:id,class_id,student_number,name', 'recorder:id,name']),
         ]);
     }
+
     public function destroy(Request $request, Attendance $attendance): JsonResponse
     {
         abort_unless(in_array($request->user()->role, ['admin', 'guru'], true), Response::HTTP_FORBIDDEN);
         $this->authorizeAttendanceAccess($request->user(), $attendance);
         $attendance->delete();
+
         return response()->json(['message' => 'Catatan absensi berhasil dihapus.']);
     }
+
     private function scopeToUser(Builder $query, User $user): void
     {
         if ($user->role === 'guru') {
@@ -108,6 +130,7 @@ class AttendanceController extends Controller
             $query->whereHas('student', fn ($students) => $students->where('user_id', $user->id));
         }
     }
+
     private function authorizeAttendanceAccess(User $user, Attendance $attendance): void
     {
         if ($user->role === 'admin') {
@@ -119,10 +142,12 @@ class AttendanceController extends Controller
                 Response::HTTP_NOT_FOUND,
                 'Data absensi tidak ditemukan.',
             );
+
             return;
         }
         $this->ensureTeacherCanAccess($user, $attendance->student);
     }
+
     private function ensureTeacherCanAccess(User $user, Student $student): void
     {
         if ($user->role === 'guru') {

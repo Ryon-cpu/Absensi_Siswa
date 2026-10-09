@@ -1,10 +1,15 @@
 <?php
+
 namespace App\Providers;
+
+use App\Contracts\WhatsAppMessageSender;
+use App\Services\WhatsAppCloudApiMessageSender;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
+
 class AppServiceProvider extends ServiceProvider
 {
     /**
@@ -12,8 +17,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(WhatsAppMessageSender::class, WhatsAppCloudApiMessageSender::class);
     }
+
     /**
      * Bootstrap any application services.
      */
@@ -21,6 +27,7 @@ class AppServiceProvider extends ServiceProvider
     {
         RateLimiter::for('login', function (Request $request): Limit {
             $email = Str::lower($request->string('email')->toString());
+
             return Limit::perMinute(5)->by(Str::transliterate($email.'|'.$request->ip()));
         });
     }
