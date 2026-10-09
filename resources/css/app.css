@@ -42,6 +42,7 @@ a { color: inherit; text-decoration: none; }
 .field-control { width: 100%; min-height: 46px; padding: 11px 13px; border: 1px solid #dfe6e2; border-radius: 9px; outline: none; color: var(--color-ink); background: #fff; transition: border-color .2s, box-shadow .2s; }
 .field-control:focus { border-color: #66a98a; box-shadow: 0 0 0 3px rgba(30,124,88,.11); }
 .field-control::placeholder { color: #a2aca7; }
+.field-hint { color: var(--color-muted); font-size: 11px; line-height: 1.5; }
 .password-input-wrap { position: relative; }
 .password-input-wrap .field-control { padding-right: 48px; }
 .password-toggle { position: absolute; top: 50%; right: 7px; display: grid; place-items: center; width: 34px; height: 34px; padding: 0; transform: translateY(-50%); border: 0; border-radius: 7px; color: #77827d; background: transparent; }

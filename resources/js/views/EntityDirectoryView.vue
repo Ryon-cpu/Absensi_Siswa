@@ -30,8 +30,19 @@ const config = computed(() => ({
             { name: 'student_number', label: 'Nomor induk siswa', type: 'text', required: true },
             { name: 'name', label: 'Nama siswa', type: 'text', required: true },
             { name: 'class_id', label: 'Kelas', type: 'select', required: true },
+            {
+                name: 'parent_whatsapp_phone',
+                label: 'Nomor WhatsApp orang tua/wali',
+                type: 'tel',
+                required: false,
+                placeholder: '+6281234567890',
+                pattern: '\\+[1-9][0-9]{7,14}',
+                maxLength: 16,
+                inputmode: 'tel',
+                hint: 'Gunakan format internasional, contoh +6281234567890. Boleh dikosongkan.',
+            },
         ],
-        columns: ['Nomor induk', 'Nama siswa', 'Kelas'],
+        columns: ['Nomor induk', 'Nama siswa', 'Kelas', 'WhatsApp wali'],
     },
     classes: {
         title: 'Data kelas',
@@ -81,6 +92,7 @@ function fieldValue(field, row) {
     if (field === 'Nomor induk') return row.student_number;
     if (field === 'Nama siswa' || field === 'Nama guru' || field === 'Nama kelas') return row.name;
     if (field === 'Kelas') return row.school_class?.name ?? 'Belum ditentukan';
+    if (field === 'WhatsApp wali') return row.parent_whatsapp_phone ?? 'Belum diisi';
     if (field === 'Jumlah siswa') return row.students_count ?? 0;
     if (field === 'Jumlah guru') return row.teachers_count ?? 0;
     if (field === 'Email') return row.user?.email ?? '—';
@@ -263,8 +275,12 @@ watch(resource, () => {
                     class="field-control"
                     :type="field.type"
                     :required="field.required && !(editingItem && field.name === 'password')"
-                    :placeholder="editingItem && field.name === 'password' ? 'Kosongkan jika tidak diubah' : field.label"
-                    :autocomplete="field.name === 'password' ? 'new-password' : 'off'">
+                    :placeholder="editingItem && field.name === 'password' ? 'Kosongkan jika tidak diubah' : (field.placeholder ?? field.label)"
+                    :autocomplete="field.name === 'password' ? 'new-password' : 'off'"
+                    :pattern="field.pattern"
+                    :maxlength="field.maxLength"
+                    :inputmode="field.inputmode">
+                <small v-if="field.hint" class="field-hint">{{ field.hint }}</small>
             </div>
             <div class="modal-actions">
                 <button class="button button-secondary" type="button" @click="modalOpen = false">Batal</button>

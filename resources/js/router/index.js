@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import { loadCurrentUser } from '../auth';
+import { clearCurrentUser, loadCurrentUser } from '../auth';
+import axios from '../bootstrap';
 import { notify } from '../notifications';
 const routes = [
     { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { guest: true } },
@@ -19,6 +20,24 @@ const router = createRouter({
     history: createWebHistory(),
     routes,
 });
+axios.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        const requestUrl = error.config?.url;
+        if (
+            error.response?.status === 401
+            && requestUrl?.startsWith('/api/')
+            && requestUrl !== '/api/login'
+            && requestUrl !== '/api/me'
+        ) {
+            const redirect = router.currentRoute.value.fullPath;
+            clearCurrentUser();
+            notify('Sesi login telah berakhir. Silakan masuk kembali.', 'error');
+            void router.replace({ name: 'login', query: { redirect } });
+        }
+        return Promise.reject(error);
+    },
+);
 router.beforeEach(async (to) => {
     let user;
     try {

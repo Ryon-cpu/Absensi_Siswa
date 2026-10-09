@@ -21,7 +21,7 @@ Proyek ini dibuat sebagai portofolio pengembangan web dengan menerapkan pemisaha
 | Vue Router      | Pengaturan navigasi halaman           |
 | Axios           | Mengirim HTTP request ke REST API     |
 | CSS biasa       | Mengatur tampilan dan layout          |
-| Laravel Sanctum | Autentikasi API jika diperlukan       |
+| Laravel Sanctum | Autentikasi session-cookie untuk SPA   |
 **Ketentuan frontend:** gunakan CSS biasa dengan selector seperti `.sidebar`, `.dashboard`, `.attendance-table`, dan `.form-group`. Jangan menggunakan Tailwind CSS, Bootstrap, atau framework CSS lainnya.
 Gunakan JavaScript dengan Vue.js 3 Composition API dan `<script setup>` jika sesuai dengan struktur proyek.
 ## 4. Jenis Pengguna dan Hak Akses
@@ -60,6 +60,7 @@ Setiap role harus memiliki batasan akses yang jelas. Menyembunyikan tombol pada 
 10. Ringkasan statistik kehadiran.
 11. Validasi data pada frontend dan backend.
 12. Pesan kesalahan dan notifikasi ketika proses berhasil atau gagal.
+13. Antrean notifikasi WhatsApp wali untuk absensi `alpa`, `izin`, atau `sakit` (memerlukan konfigurasi Cloud API).
 Status absensi yang digunakan:
 * `hadir`: siswa hadir.
 * `izin`: siswa tidak hadir dengan izin.
@@ -96,6 +97,7 @@ Menyimpan informasi siswa.
 | class_id       | Foreign key ke classes                                          |
 | student_number | Nomor induk siswa yang unik                                     |
 | name           | Nama siswa                                                      |
+| parent_whatsapp_phone | Nomor WhatsApp orang tua/wali dalam format internasional; boleh NULL |
 | created_at     | Waktu data dibuat                                               |
 | updated_at     | Waktu data diperbarui                                           |
 ### Tabel `teachers`
@@ -130,6 +132,11 @@ Menyimpan catatan kehadiran siswa.
 | updated_at  | Waktu data diperbarui                      |
 Terapkan unique constraint pada kombinasi `student_id` dan `date` untuk mencegah satu siswa memiliki lebih dari satu catatan absensi pada tanggal yang sama.
 Gunakan foreign key, validasi, dan aturan penghapusan data yang sesuai. Hindari penghapusan berantai yang dapat menghilangkan riwayat absensi tanpa sengaja.
+### Tabel `attendance_notifications`
+Menyimpan status antrean/pengiriman notifikasi absensi. Satu pasangan `attendance_id`
+dan `trigger_status` hanya boleh memiliki satu riwayat agar status absensi yang sama
+tidak memicu pengiriman berulang. Kolom pentingnya adalah `recipient_phone`, `status`,
+`attempts`, `last_error`, `provider_message_id`, dan `sent_at`.
 ## 7. Entity Relationship Diagram (ERD)
 Diagram berikut menggambarkan hubungan antartabel utama.
 ```mermaid
@@ -507,12 +514,20 @@ Tahap ini dilakukan setelah fondasi database, backend, pengujian, dan frontend t
 ## 17. Instalasi dan Menjalankan Proyek
 Jalankan perintah dari direktori utama repository; di sinilah file `artisan`
 dan `package.json` berada.
+### Persyaratan
+* PHP `>=8.3` dan `<9.0`, sesuai batas versi `^8.3` di `composer.json`.
+* Composer untuk memasang dependency Laravel.
+* Node.js `^20.19.0` atau `>=22.12.0` dan npm, sesuai persyaratan Vite yang terkunci.
+* Server database MySQL yang dapat diakses untuk menjalankan aplikasi lokal.
+
 ### Backend
 Pasang dependency:
 ```bash
 composer install
 ```
-Salin file konfigurasi lingkungan dari `.env.example` menjadi `.env`, lalu sesuaikan konfigurasi database MySQL.
+Salin `.env.example` menjadi `.env`, lalu isi konfigurasi database lokal. Pastikan
+`.env` menunjuk ke database pengembangan yang benar sebelum menjalankan migration;
+jangan gunakan data produksi untuk pengembangan atau pengujian.
 Untuk frontend Vue yang berjalan di origin berbeda, sesuaikan `SANCTUM_STATEFUL_DOMAINS`
 dan `CORS_ALLOWED_ORIGINS` pada `.env` dengan origin frontend. Request Axios harus
 mengaktifkan `withCredentials` dan `withXSRFToken`, serta meminta `/sanctum/csrf-cookie`
@@ -525,7 +540,8 @@ Jalankan migration:
 ```bash
 php artisan migrate
 ```
-Perintah ini hanya membuat struktur tabel. Data akun dan data contoh belum ditambahkan.
+Jalankan hanya pada database lokal yang sudah dipastikan benar. Perintah ini membuat
+struktur tabel; `DatabaseSeeder` tidak membuat akun atau data contoh.
 Jalankan server pengembangan:
 ```bash
 php artisan serve
@@ -535,7 +551,7 @@ Frontend Vue berada di dalam aplikasi Laravel, bukan di folder `frontend` terpis
 Buka terminal baru di direktori utama repository.
 Pasang dependency:
 ```bash
-npm install
+npm ci
 ```
 Jalankan Vite:
 ```bash
@@ -550,9 +566,31 @@ Jalankan pengujian backend menggunakan:
 ```bash
 php artisan test
 ```
-Untuk frontend, jalankan perintah pengujian yang tersedia pada `package.json` jika pengujian frontend telah dikonfigurasi.
-Pastikan pengujian penting mencakup autentikasi, hak akses, validasi, CRUD, dan pencegahan absensi ganda.
-## 19. Instruksi untuk AI di VS Code
+Konfigurasi PHPUnit menggunakan SQLite `:memory:` dan factory untuk membuat data uji;
+test tidak memerlukan akun demo atau database aplikasi. Seeder tidak menyediakan
+kredensial login bawaan. Untuk uji browser manual, gunakan akun uji buatan sendiri
+di database pengembangan yang terisolasi, bukan akun atau data produksi.
+
+Belum ada script tes otomatis frontend pada `package.json`. Periksa bundle frontend
+dengan:
+```bash
+npm run build
+```
+Tes notifikasi menggunakan mock/fake untuk pengirim atau HTTP; tes otomatis tidak
+mengirim pesan WhatsApp sungguhan.
+## 19. Notifikasi WhatsApp
+Pengiriman memakai WhatsApp Business Platform Cloud API dan job antrean. Konfigurasi
+berikut dibaca dari `.env` dan tidak boleh ditulis sebagai kredensial di source code:
+`WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_API_VERSION`,
+`WHATSAPP_TEMPLATE_NAME`, dan `WHATSAPP_TEMPLATE_LANGUAGE`.
+
+Provider belum dikonfigurasi pada lingkungan/repository ini; nilai wajib Cloud API
+belum tersedia. Sebelum mengaktifkan pengiriman, siapkan kredensial resmi dan template
+yang disetujui Meta. Template harus menerima parameter nama siswa, status absensi,
+dan tanggal secara berurutan. Pastikan koneksi antrean yang dipilih aman, lalu jalankan
+worker (`php artisan queue:work`) hanya pada lingkungan yang memang boleh mengirim
+pesan. Jangan memakai worker produksi untuk pengujian; gunakan mock/fake.
+## 20. Instruksi untuk AI di VS Code
 Gunakan ketentuan berikut ketika mengembangkan proyek ini dengan AI di VS Code.
 1. Periksa seluruh struktur folder dan file yang sudah tersedia sebelum mengubah kode.
 2. Baca `README.md` ini sebagai panduan utama kebutuhan proyek.
@@ -572,7 +610,7 @@ Gunakan ketentuan berikut ketika mengembangkan proyek ini dengan AI di VS Code.
 16. Jika terdapat konflik antara kode yang sudah ada dan dokumentasi ini, jelaskan perbedaannya terlebih dahulu dan pilih solusi yang paling sederhana serta konsisten.
 17. Setelah menyelesaikan setiap tahap, jelaskan file yang dibuat atau diubah, fitur yang selesai, perintah yang perlu dijalankan, dan cara menguji hasilnya.
 18. Jangan menampilkan, menyimpan, atau memasukkan kredensial asli dan file rahasia ke repository.
-## 20. Status Pengembangan
+## 21. Status Pengembangan
 Status berikut digunakan untuk memantau progres proyek.
 * [x] Tahap 1: Database, migration, model, dan relasi.
 * [x] Tahap 2: Backend Laravel REST API.
@@ -581,8 +619,10 @@ Status berikut digunakan untuk memantau progres proyek.
 * [x] Tahap 5: Integrasi frontend dan backend.
 * [x] Pengujian akhir dan perbaikan bug.
 * [x] Dokumentasi instalasi selesai.
+* [x] Implementasi notifikasi WhatsApp Cloud API dan pengujian dengan mock.
+* [ ] Konfigurasi akun/provider WhatsApp dan verifikasi pengiriman nyata.
 * [ ] Repository siap dipublikasikan.
-## 21. Lisensi
+## 22. Lisensi
 Lisensi proyek dapat ditentukan setelah kebutuhan publikasi dipastikan. Jika ingin mengizinkan orang lain menggunakan, memodifikasi, dan mendistribusikan kode, pilih lisensi open-source yang sesuai dan sertakan file lisensinya.
 ---
 **Catatan:** Proyek ini dikembangkan sebagai aplikasi pembelajaran dan portofolio. Gunakan data dummy untuk demonstrasi dan hindari memasukkan data pribadi siswa atau kredensial asli ke repository publik.
