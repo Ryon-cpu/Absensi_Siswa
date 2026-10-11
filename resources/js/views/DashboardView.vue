@@ -3,11 +3,15 @@ import { computed, onMounted, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import PageState from '../components/PageState.vue';
 import { useAuth } from '../auth';
-import { getDashboard } from '../services/api';
+import { getAttendanceReport, getDashboard } from '../services/api';
 const auth = useAuth();
 const dashboard = ref(null);
 const loading = ref(true);
 const errorMessage = ref('');
+const semesterReport = ref(null);
+const semesterFilters = ref({ from: '', to: '' });
+const semesterLoading = ref(true);
+const semesterError = ref('');
 const greeting = computed(() => {
     const hour = new Date().getHours();
     if (hour < 11) return 'Selamat pagi';
@@ -98,7 +102,28 @@ async function loadDashboard() {
         loading.value = false;
     }
 }
-onMounted(loadDashboard);
+async function loadSemesterReport() {
+    semesterLoading.value = true;
+    semesterError.value = '';
+    try {
+        const query = {
+            ...(semesterFilters.value.from ? { from: semesterFilters.value.from } : {}),
+            ...(semesterFilters.value.to ? { to: semesterFilters.value.to } : {}),
+        };
+        semesterReport.value = await getAttendanceReport(query);
+    } catch (error) {
+        semesterError.value = Object.values(error.response?.data?.errors ?? {}).flat()[0]
+            ?? 'Rekap semester tidak dapat dimuat. Periksa koneksi lalu coba lagi.';
+    } finally {
+        semesterLoading.value = false;
+    }
+}
+onMounted(() => {
+    void loadDashboard();
+    if (auth.user?.role === 'admin') {
+        void loadSemesterReport();
+    }
+});
 </script>
 <template>
     <PageState :loading="loading" :error="errorMessage">
@@ -166,6 +191,57 @@ onMounted(loadDashboard);
                         </RouterLink>
                     </div>
                 </article>
+            </section>
+            <section v-if="auth.user?.role === 'admin'" class="card dashboard-semester-section">
+                <header class="card-heading dashboard-semester-heading">
+                    <div>
+                        <span class="section-kicker">TREN KEHADIRAN</span>
+                        <h2>Rekap semester</h2>
+                        <p>Persentase hadir dan siswa yang paling sering tidak hadir.</p>
+                    </div>
+                </header>
+                <form class="filter-row dashboard-semester-filter" @submit.prevent="loadSemesterReport">
+                    <div class="field-group"><label for="dashboard-semester-from">Awal semester</label><input id="dashboard-semester-from" v-model="semesterFilters.from" class="field-control" type="date"></div>
+                    <div class="field-group"><label for="dashboard-semester-to">Akhir semester</label><input id="dashboard-semester-to" v-model="semesterFilters.to" class="field-control" type="date"></div>
+                    <button class="button button-primary" type="submit" :disabled="semesterLoading">Terapkan periode</button>
+                </form>
+                <p class="field-hint report-filter-hint">Tentukan tanggal awal dan akhir semester. Jika dikosongkan, rekap menampilkan seluruh riwayat.</p>
+                <div v-if="semesterLoading" class="loading-state">Memuat rekap semester...</div>
+                <div v-else-if="semesterError" class="notice-error dashboard-semester-error">{{ semesterError }}</div>
+                <div v-else-if="semesterReport" class="report-insights-grid dashboard-semester-insights">
+                    <article class="report-panel dashboard-semester-trends">
+                        <div class="report-rate-summary"><span>Persentase hadir</span><strong>{{ semesterReport.attendance_rate }}%</strong><small>{{ semesterReport.total }} catatan absensi</small></div>
+                        <div v-if="semesterReport.daily_trends.length" class="trend-list">
+                            <div v-for="day in semesterReport.daily_trends" :key="day.date" class="trend-day">
+                                <div class="trend-day-heading"><strong>{{ day.date }}</strong><span>{{ day.attendance_rate }}% hadir</span></div>
+                                <div class="trend-track"><span class="trend-fill" :style="{ width: `${day.attendance_rate}%` }"></span></div>
+                                <div class="trend-counts"><span>Hadir {{ day.hadir }}</span><span>Izin {{ day.izin }}</span><span>Sakit {{ day.sakit }}</span><span>Alpa {{ day.alpa }}</span></div>
+                            </div>
+                        </div>
+                        <div v-else class="empty-state">Belum ada catatan absensi pada periode ini.</div>
+                    </article>
+                    <article class="report-panel dashboard-semester-students">
+                        <div class="report-panel-heading">
+                            <div><h2>Siswa sering tidak hadir</h2><p>Diurutkan berdasarkan jumlah alpa, izin, dan sakit.</p></div>
+                        </div>
+                        <div v-if="semesterReport.frequent_students.length" class="table-wrap">
+                            <table class="data-table">
+                                <thead><tr><th>Siswa</th><th>Kelas</th><th>Alpa</th><th>Izin</th><th>Sakit</th><th>Total</th></tr></thead>
+                                <tbody>
+                                    <tr v-for="student in semesterReport.frequent_students.slice(0, 5)" :key="student.student_id">
+                                        <td><div class="person-primary">{{ student.name }}</div><div class="person-secondary">{{ student.student_number }}</div></td>
+                                        <td>{{ student.class_name }}</td>
+                                        <td>{{ student.alpa }}</td>
+                                        <td>{{ student.izin }}</td>
+                                        <td>{{ student.sakit }}</td>
+                                        <td><strong>{{ student.absence_count }}</strong></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div v-else class="empty-state">Tidak ada siswa yang alpa, izin, atau sakit pada periode ini.</div>
+                    </article>
+                </div>
             </section>
         </template>
     </PageState>

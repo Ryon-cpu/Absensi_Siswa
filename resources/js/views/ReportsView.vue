@@ -46,6 +46,35 @@ function getReportRows() {
         ['Status', 'Jumlah'],
         ...reportStatuses.map((status) => [status.label, report.value[status.key]]),
         ['Total catatan', report.value.total],
+        ['Persentase hadir', `${report.value.attendance_rate}%`],
+    ];
+}
+function getTrendRows() {
+    return [
+        ['Tanggal', 'Hadir', 'Izin', 'Sakit', 'Alpa', 'Total', 'Persentase hadir'],
+        ...report.value.daily_trends.map((day) => [
+            day.date,
+            day.hadir,
+            day.izin,
+            day.sakit,
+            day.alpa,
+            day.total,
+            `${day.attendance_rate}%`,
+        ]),
+    ];
+}
+function getFrequentStudentRows() {
+    return [
+        ['NIS', 'Nama siswa', 'Kelas', 'Alpa', 'Izin', 'Sakit', 'Total tidak hadir'],
+        ...report.value.frequent_students.map((student) => [
+            student.student_number,
+            student.name,
+            student.class_name,
+            student.alpa,
+            student.izin,
+            student.sakit,
+            student.absence_count,
+        ]),
     ];
 }
 async function exportToExcel() {
@@ -77,6 +106,8 @@ async function exportToExcel() {
         worksheet['!cols'] = [{ wch: 24 }, { wch: 18 }];
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, 'Laporan Absensi');
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(getTrendRows()), 'Tren Harian');
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(getFrequentStudentRows()), 'Siswa Sering Absen');
         XLSX.writeFile(workbook, fileName);
     } catch {
         notify('File Excel tidak dapat dibuat. Coba lagi.', 'error');
@@ -118,12 +149,31 @@ async function exportToPdf() {
             head: [reportRows[0]],
             body: reportRows.slice(1),
         });
+        let nextY = document.lastAutoTable.finalY + 12;
+        nextY = addPdfSection(document, autoTable, 'Tren Kehadiran Harian', getTrendRows(), nextY);
+        addPdfSection(document, autoTable, 'Siswa Sering Tidak Hadir', getFrequentStudentRows(), nextY);
         document.save(fileName);
     } catch {
         notify('File PDF tidak dapat dibuat. Coba lagi.', 'error');
     } finally {
         exporting.value = '';
     }
+}
+function addPdfSection(document, autoTable, title, rows, startY) {
+    let sectionStartY = startY;
+    if (sectionStartY > 250) {
+        document.addPage();
+        sectionStartY = 20;
+    }
+    document.setFontSize(12);
+    document.text(title, 14, sectionStartY);
+    autoTable(document, {
+        startY: sectionStartY + 5,
+        head: [rows[0]],
+        body: rows.slice(1),
+        styles: { fontSize: 8 },
+    });
+    return document.lastAutoTable.finalY + 12;
 }
 async function loadReport() {
     loading.value = true;
@@ -162,12 +212,12 @@ onMounted(async () => {
 </script>
 <template>
     <div class="page-heading">
-        <div><h1>Laporan kehadiran</h1><p>Ringkasan statistik kehadiran berdasarkan rentang tanggal dan kelas.</p></div>
+        <div><h1>Laporan kehadiran</h1><p>Atur tanggal awal dan akhir semester untuk melihat tren serta rekap siswa.</p></div>
     </div>
     <section class="card" style="padding: 18px 20px;">
         <form class="filter-row" @submit.prevent="loadReport">
-            <div class="field-group"><label for="report-from">Dari tanggal</label><input id="report-from" v-model="filters.from" class="field-control" type="date"></div>
-            <div class="field-group"><label for="report-to">Sampai tanggal</label><input id="report-to" v-model="filters.to" class="field-control" type="date"></div>
+            <div class="field-group"><label for="report-from">Awal semester</label><input id="report-from" v-model="filters.from" class="field-control" type="date"></div>
+            <div class="field-group"><label for="report-to">Akhir semester</label><input id="report-to" v-model="filters.to" class="field-control" type="date"></div>
             <div class="field-group">
                 <label for="report-class">Kelas</label>
                 <select id="report-class" v-model="filters.class_id" class="field-control">
@@ -179,12 +229,50 @@ onMounted(async () => {
             <button class="button button-secondary" type="button" :disabled="Boolean(exporting)" @click="exportToExcel">{{ exporting === 'excel' ? 'Menyiapkan Excel...' : 'Ekspor Excel' }}</button>
             <button class="button button-primary" type="button" :disabled="Boolean(exporting)" @click="exportToPdf">{{ exporting === 'pdf' ? 'Menyiapkan PDF...' : 'Ekspor PDF' }}</button>
         </form>
+        <p class="field-hint report-filter-hint">Tentukan tanggal awal dan akhir semester. Jika dikosongkan, laporan menampilkan seluruh riwayat.</p>
     </section>
     <PageState :loading="loading" :error="errorMessage">
         <section v-if="report" class="report-grid">
             <article class="card report-card"><span>Total catatan</span><strong>{{ report.total }}</strong></article>
             <article v-for="status in reportStatuses" :key="status.key" class="card report-card">
                 <span>{{ status.label }}</span><strong>{{ report[status.key] }}</strong>
+            </article>
+            <article class="card report-card"><span>Persentase hadir</span><strong>{{ report.attendance_rate }}%</strong></article>
+        </section>
+        <section v-if="report" class="report-insights-grid">
+            <article class="card report-panel">
+                <div class="report-panel-heading">
+                    <div><h2>Tren kehadiran harian</h2><p>Persentase hadir dihitung dari catatan pada setiap tanggal.</p></div>
+                </div>
+                <div v-if="report.daily_trends.length" class="trend-list">
+                    <div v-for="day in report.daily_trends" :key="day.date" class="trend-day">
+                        <div class="trend-day-heading"><strong>{{ day.date }}</strong><span>{{ day.attendance_rate }}% hadir</span></div>
+                        <div class="trend-track"><span class="trend-fill" :style="{ width: `${day.attendance_rate}%` }"></span></div>
+                        <div class="trend-counts"><span>Hadir {{ day.hadir }}</span><span>Izin {{ day.izin }}</span><span>Sakit {{ day.sakit }}</span><span>Alpa {{ day.alpa }}</span></div>
+                    </div>
+                </div>
+                <div v-else class="empty-state">Belum ada catatan absensi pada periode ini.</div>
+            </article>
+            <article class="card report-panel">
+                <div class="report-panel-heading">
+                    <div><h2>Siswa sering tidak hadir</h2><p>10 siswa teratas berdasarkan jumlah alpa, izin, dan sakit.</p></div>
+                </div>
+                <div v-if="report.frequent_students.length" class="table-wrap">
+                    <table class="data-table">
+                        <thead><tr><th>Siswa</th><th>Kelas</th><th>Alpa</th><th>Izin</th><th>Sakit</th><th>Total</th></tr></thead>
+                        <tbody>
+                            <tr v-for="student in report.frequent_students" :key="student.student_id">
+                                <td><div class="person-cell"><div><div class="person-primary">{{ student.name }}</div><div class="person-secondary">{{ student.student_number }}</div></div></div></td>
+                                <td>{{ student.class_name }}</td>
+                                <td>{{ student.alpa }}</td>
+                                <td>{{ student.izin }}</td>
+                                <td>{{ student.sakit }}</td>
+                                <td><strong>{{ student.absence_count }}</strong></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div v-else class="empty-state">Tidak ada data siswa yang alpa, izin, atau sakit pada periode ini.</div>
             </article>
         </section>
     </PageState>

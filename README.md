@@ -63,6 +63,7 @@ Setiap role harus memiliki batasan akses yang jelas. Menyembunyikan tombol pada 
 12. Pesan kesalahan dan notifikasi ketika proses berhasil atau gagal.
 13. Antrean notifikasi WhatsApp wali untuk absensi `alpa`, `izin`, atau `sakit` (memerlukan konfigurasi Cloud API).
 14. Ekspor ringkasan laporan ke file Excel `.xlsx` dan PDF.
+15. Rekap persentase kehadiran, tren harian, dan siswa yang sering tidak hadir berdasarkan periode pilihan.
 Status absensi yang digunakan:
 * `hadir`: siswa hadir.
 * `izin`: siswa tidak hadir dengan izin.
@@ -256,7 +257,7 @@ kelas tersebut. Siswa hanya dapat melihat riwayat absensinya sendiri.
 | GET    | `/api/attendance/{id}`    | Menampilkan detail absensi             |
 | PUT    | `/api/attendance/{id}`    | Memperbarui absensi jika diizinkan     |
 | DELETE | `/api/attendance/{id}`    | Menghapus absensi jika diizinkan       |
-| GET    | `/api/reports/attendance` | Menampilkan laporan kehadiran          |
+| GET    | `/api/reports/attendance` | Menampilkan ringkasan, tren, dan siswa yang sering tidak hadir |
 Pencatatan dan perubahan absensi dibatasi untuk admin serta guru yang ditugaskan
 pada kelas siswa. Satu siswa hanya dapat memiliki satu catatan absensi per tanggal.
 Status yang diterima API adalah `hadir`, `izin`, `sakit`, dan `alpa`.
