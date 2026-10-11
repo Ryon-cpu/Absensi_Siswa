@@ -22,6 +22,7 @@ Proyek ini dibuat sebagai portofolio pengembangan web dengan menerapkan pemisaha
 | Axios           | Mengirim HTTP request ke REST API     |
 | CSS biasa       | Mengatur tampilan dan layout          |
 | Laravel Sanctum | Autentikasi session-cookie untuk SPA   |
+| SheetJS, jsPDF, AutoTable | Ekspor ringkasan laporan ke XLSX dan PDF |
 **Ketentuan frontend:** gunakan CSS biasa dengan selector seperti `.sidebar`, `.dashboard`, `.attendance-table`, dan `.form-group`. Jangan menggunakan Tailwind CSS, Bootstrap, atau framework CSS lainnya.
 Gunakan JavaScript dengan Vue.js 3 Composition API dan `<script setup>` jika sesuai dengan struktur proyek.
 ## 4. Jenis Pengguna dan Hak Akses
@@ -61,6 +62,7 @@ Setiap role harus memiliki batasan akses yang jelas. Menyembunyikan tombol pada 
 11. Validasi data pada frontend dan backend.
 12. Pesan kesalahan dan notifikasi ketika proses berhasil atau gagal.
 13. Antrean notifikasi WhatsApp wali untuk absensi `alpa`, `izin`, atau `sakit` (memerlukan konfigurasi Cloud API).
+14. Ekspor ringkasan laporan ke file Excel `.xlsx` dan PDF.
 Status absensi yang digunakan:
 * `hadir`: siswa hadir.
 * `izin`: siswa tidak hadir dengan izin.

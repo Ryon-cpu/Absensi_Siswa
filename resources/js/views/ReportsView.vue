@@ -1,30 +1,149 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import PageState from '../components/PageState.vue';
 import { getAttendanceReport, getClasses } from '../services/api';
+import { notify } from '../notifications';
 const report = ref(null);
+const appliedFilters = ref(null);
 const classes = ref([]);
 const loading = ref(true);
+const exporting = ref('');
 const errorMessage = ref('');
 const filters = ref({ from: '', to: '', class_id: '' });
+const canExport = computed(() => Boolean(
+    report.value
+    && appliedFilters.value
+    && Object.keys(filters.value).every((key) => String(filters.value[key]) === String(appliedFilters.value[key])),
+));
 const reportStatuses = [
     { label: 'Hadir', key: 'hadir', icon: '✓' },
     { label: 'Izin', key: 'izin', icon: '↗' },
     { label: 'Sakit', key: 'sakit', icon: '♡' },
     { label: 'Alpa', key: 'alpa', icon: '◷' },
 ];
+function getExportDetails(extension) {
+    const activeFilters = appliedFilters.value;
+    const selectedClass = classes.value.find((schoolClass) => String(schoolClass.id) === String(activeFilters.class_id));
+    const className = selectedClass?.name ?? 'Semua kelas';
+    const safeClassName = className
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .toLowerCase() || 'semua-kelas';
+    const period = activeFilters.from || activeFilters.to
+        ? `${activeFilters.from || 'awal'} s.d. ${activeFilters.to || 'akhir'}`
+        : 'Semua tanggal';
+
+    return {
+        className,
+        fileName: `laporan-absensi-${activeFilters.from || 'awal'}-${activeFilters.to || 'akhir'}-${safeClassName}.${extension}`,
+        period,
+    };
+}
+function getReportRows() {
+    return [
+        ['Status', 'Jumlah'],
+        ...reportStatuses.map((status) => [status.label, report.value[status.key]]),
+        ['Total catatan', report.value.total],
+    ];
+}
+async function exportToExcel() {
+    if (exporting.value) {
+        return;
+    }
+    if (loading.value) {
+        notify('Tunggu laporan selesai dimuat sebelum mengekspor.', 'error');
+        return;
+    }
+    exporting.value = 'excel';
+    try {
+        if (!canExport.value) {
+            const loaded = await loadReport();
+            if (!loaded || !canExport.value) {
+                notify('Laporan sesuai filter terbaru tidak dapat dimuat.', 'error');
+                return;
+            }
+        }
+        const XLSX = await import('@e965/xlsx');
+        const { className, fileName, period } = getExportDetails('xlsx');
+        const worksheet = XLSX.utils.aoa_to_sheet([
+            ['Laporan Kehadiran Siswa'],
+            ['Periode', period],
+            ['Kelas', `'${className}`],
+            [],
+            ...getReportRows(),
+        ]);
+        worksheet['!cols'] = [{ wch: 24 }, { wch: 18 }];
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Laporan Absensi');
+        XLSX.writeFile(workbook, fileName);
+    } catch {
+        notify('File Excel tidak dapat dibuat. Coba lagi.', 'error');
+    } finally {
+        exporting.value = '';
+    }
+}
+async function exportToPdf() {
+    if (exporting.value) {
+        return;
+    }
+    if (loading.value) {
+        notify('Tunggu laporan selesai dimuat sebelum mengekspor.', 'error');
+        return;
+    }
+    exporting.value = 'pdf';
+    try {
+        if (!canExport.value) {
+            const loaded = await loadReport();
+            if (!loaded || !canExport.value) {
+                notify('Laporan sesuai filter terbaru tidak dapat dimuat.', 'error');
+                return;
+            }
+        }
+        const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+            import('jspdf'),
+            import('jspdf-autotable'),
+        ]);
+        const { className, fileName, period } = getExportDetails('pdf');
+        const document = new jsPDF();
+        document.setFontSize(16);
+        document.text('Laporan Kehadiran Siswa', 14, 18);
+        document.setFontSize(10);
+        document.text(`Periode: ${period}`, 14, 27);
+        document.text(`Kelas: ${className}`, 14, 33);
+        const reportRows = getReportRows();
+        autoTable(document, {
+            startY: 40,
+            head: [reportRows[0]],
+            body: reportRows.slice(1),
+        });
+        document.save(fileName);
+    } catch {
+        notify('File PDF tidak dapat dibuat. Coba lagi.', 'error');
+    } finally {
+        exporting.value = '';
+    }
+}
 async function loadReport() {
     loading.value = true;
+    report.value = null;
+    appliedFilters.value = null;
     errorMessage.value = '';
     try {
-        report.value = await getAttendanceReport({
-            ...(filters.value.from ? { from: filters.value.from } : {}),
-            ...(filters.value.to ? { to: filters.value.to } : {}),
-            ...(filters.value.class_id ? { class_id: filters.value.class_id } : {}),
-        });
+        const requestedFilters = { ...filters.value };
+        const query = {
+            ...(requestedFilters.from ? { from: requestedFilters.from } : {}),
+            ...(requestedFilters.to ? { to: requestedFilters.to } : {}),
+            ...(requestedFilters.class_id ? { class_id: requestedFilters.class_id } : {}),
+        };
+        report.value = await getAttendanceReport(query);
+        appliedFilters.value = requestedFilters;
+        return true;
     } catch (error) {
         errorMessage.value = Object.values(error.response?.data?.errors ?? {}).flat()[0]
             ?? 'Laporan tidak dapat dimuat. Periksa filter dan koneksi lalu coba lagi.';
+        return false;
     } finally {
         loading.value = false;
     }
@@ -57,6 +176,8 @@ onMounted(async () => {
                 </select>
             </div>
             <button class="button button-primary" type="submit" :disabled="loading">Terapkan filter</button>
+            <button class="button button-secondary" type="button" :disabled="Boolean(exporting)" @click="exportToExcel">{{ exporting === 'excel' ? 'Menyiapkan Excel...' : 'Ekspor Excel' }}</button>
+            <button class="button button-primary" type="button" :disabled="Boolean(exporting)" @click="exportToPdf">{{ exporting === 'pdf' ? 'Menyiapkan PDF...' : 'Ekspor PDF' }}</button>
         </form>
     </section>
     <PageState :loading="loading" :error="errorMessage">
