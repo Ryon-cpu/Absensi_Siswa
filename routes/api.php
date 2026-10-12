@@ -1,13 +1,18 @@
 <?php
+
+use App\Http\Controllers\Api\AttendanceAuditLogController;
 use App\Http\Controllers\Api\AttendanceController;
+use App\Http\Controllers\Api\AttendanceSessionController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ClassAssignmentController;
+use App\Http\Controllers\Api\ClassSubjectController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\SchoolClassController;
 use App\Http\Controllers\Api\StudentController;
 use App\Http\Controllers\Api\TeacherController;
 use Illuminate\Support\Facades\Route;
+
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
 Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/logout', [AuthController::class, 'logout']);
@@ -23,10 +28,22 @@ Route::middleware('auth:sanctum')->group(function (): void {
         Route::delete('/class-assignments/{classTeacher}', [ClassAssignmentController::class, 'destroy']);
         Route::get('/reports/attendance', ReportController::class);
     });
+    Route::get('/attendance-audit-logs', [AttendanceAuditLogController::class, 'index'])
+        ->middleware('role:guru');
     Route::get('/classes/{schoolClass}/students', [SchoolClassController::class, 'students'])
+        ->middleware('role:admin,guru');
+    Route::get('/classes/{schoolClass}/subjects', [ClassSubjectController::class, 'index'])
+        ->middleware('role:admin,guru');
+    Route::post('/classes/{schoolClass}/subjects', [ClassSubjectController::class, 'store'])
         ->middleware('role:admin,guru');
     Route::get('/teacher/classes', [ClassAssignmentController::class, 'teacherClasses'])
         ->middleware('role:guru');
+    Route::post('/attendance-sessions', [AttendanceSessionController::class, 'store'])
+        ->middleware('role:admin,guru');
+    Route::get('/attendance/sheet', [AttendanceController::class, 'sheet'])
+        ->middleware('role:admin,guru');
+    Route::post('/attendance/sheet', [AttendanceController::class, 'storeSheet'])
+        ->middleware('role:admin,guru');
     Route::apiResource('attendance', AttendanceController::class)
         ->only(['index', 'show', 'store', 'update', 'destroy'])
         ->middleware('role:admin,guru,siswa');

@@ -54,11 +54,18 @@ onMounted(loadHistory);
         <PageState :loading="loading" :error="errorMessage" :empty="attendance.length === 0" empty-message="Belum ada riwayat absensi.">
             <div class="table-wrap">
                 <table class="data-table">
-                    <thead><tr><th>Tanggal</th><th>Kelas</th><th>Status</th><th>Dicatat oleh</th></tr></thead>
+                    <thead><tr><th>Tanggal</th><th>Kelas</th><th>Mapel / pertemuan</th><th>Status</th><th>Dicatat oleh</th></tr></thead>
                     <tbody>
                         <tr v-for="record in attendance" :key="record.id">
                             <td>{{ record.date }}</td>
                             <td>{{ record.student.school_class?.name ?? '—' }}</td>
+                            <td>
+                                <template v-if="record.attendance_session">
+                                    {{ record.attendance_session.subject?.name ?? '—' }}
+                                    · Pertemuan {{ record.attendance_session.meeting_number }}
+                                </template>
+                                <span v-else>Absensi harian lama</span>
+                            </td>
                             <td><span class="badge" :class="record.status">{{ record.status }}</span></td>
                             <td>{{ record.recorder?.name ?? '—' }}</td>
                         </tr>

@@ -20,6 +20,7 @@ const navigation = computed(() => {
         { label: 'Pencatatan absensi', icon: '✓', to: '/attendance', roles: ['admin', 'guru'] },
         { label: 'Riwayat absensi', icon: '◷', to: '/history', roles: ['siswa'] },
         { label: 'Laporan', icon: '▥', to: '/reports', roles: ['admin'] },
+        { label: 'Audit perubahan', icon: '◷', to: '/attendance-audit-logs', roles: ['guru'] },
     ];
     return common.filter((item) => item.roles.includes(auth.user?.role));
 });

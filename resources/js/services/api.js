@@ -43,12 +43,36 @@ export async function getClassStudents(classId, params = {}) {
     const response = await axios.get(`/api/classes/${classId}/students`, { params });
     return response.data.data;
 }
+export async function getClassSubjects(classId) {
+    const response = await axios.get(`/api/classes/${classId}/subjects`);
+    return response.data.data;
+}
+export async function createClassSubject(classId, payload) {
+    const response = await axios.post(`/api/classes/${classId}/subjects`, payload);
+    return response.data.data;
+}
+export async function createAttendanceSession(payload) {
+    const response = await axios.post('/api/attendance-sessions', payload);
+    return response.data.data;
+}
 export async function getAttendance(params = {}) {
     const response = await axios.get('/api/attendance', { params });
     return response.data.data;
 }
+export async function getAttendanceSheet(params = {}) {
+    const response = await axios.get('/api/attendance/sheet', { params });
+    return response.data.data;
+}
+export async function saveAttendanceSheet(payload) {
+    const response = await axios.post('/api/attendance/sheet', payload);
+    return response.data;
+}
 export async function getAttendanceReport(params = {}) {
     const response = await axios.get('/api/reports/attendance', { params });
+    return response.data.data;
+}
+export async function getAttendanceAuditLogs(params = {}) {
+    const response = await axios.get('/api/attendance-audit-logs', { params });
     return response.data.data;
 }
 export async function createStudent(payload) {

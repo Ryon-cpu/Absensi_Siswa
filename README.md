@@ -64,6 +64,7 @@ Setiap role harus memiliki batasan akses yang jelas. Menyembunyikan tombol pada 
 13. Antrean notifikasi WhatsApp wali untuk absensi `alpa`, `izin`, atau `sakit` (memerlukan konfigurasi Cloud API).
 14. Ekspor ringkasan laporan ke file Excel `.xlsx` dan PDF.
 15. Rekap persentase kehadiran, tren harian, dan siswa yang sering tidak hadir berdasarkan periode pilihan.
+16. Audit log pencatatan, perubahan status, dan penghapusan absensi.
 Status absensi yang digunakan:
 * `hadir`: siswa hadir.
 * `izin`: siswa tidak hadir dengan izin.
@@ -140,6 +141,11 @@ Menyimpan status antrean/pengiriman notifikasi absensi. Satu pasangan `attendanc
 dan `trigger_status` hanya boleh memiliki satu riwayat agar status absensi yang sama
 tidak memicu pengiriman berulang. Kolom pentingnya adalah `recipient_phone`, `status`,
 `attempts`, `last_error`, `provider_message_id`, dan `sent_at`.
+### Tabel `attendance_audit_logs`
+Menyimpan snapshot aktivitas absensi berupa pelaku, waktu, siswa, kelas, tanggal
+absensi, aksi, serta status sebelum dan sesudah perubahan. ID dan nama disimpan
+sebagai snapshot tanpa foreign key agar riwayat tidak hilang ketika data terkait
+dihapus atau berubah. Data ini mulai tercatat setelah migration fitur diterapkan.
 ## 7. Entity Relationship Diagram (ERD)
 Diagram berikut menggambarkan hubungan antartabel utama.
 ```mermaid
@@ -258,9 +264,14 @@ kelas tersebut. Siswa hanya dapat melihat riwayat absensinya sendiri.
 | PUT    | `/api/attendance/{id}`    | Memperbarui absensi jika diizinkan     |
 | DELETE | `/api/attendance/{id}`    | Menghapus absensi jika diizinkan       |
 | GET    | `/api/reports/attendance` | Menampilkan ringkasan, tren, dan siswa yang sering tidak hadir |
+| GET    | `/api/attendance-audit-logs` | Menampilkan audit perubahan absensi milik kelas yang ditugaskan (guru) |
 Pencatatan dan perubahan absensi dibatasi untuk admin serta guru yang ditugaskan
 pada kelas siswa. Satu siswa hanya dapat memiliki satu catatan absensi per tanggal.
 Status yang diterima API adalah `hadir`, `izin`, `sakit`, dan `alpa`.
+Audit log merekam pembuatan, perubahan status, dan penghapusan melalui API absensi.
+Endpoint audit hanya dapat diakses guru dan hasilnya dibatasi ke kelas yang
+ditugaskan kepadanya. Endpoint mendukung filter `from`, `to`,
+`class_id`, `student_id`, serta `action`.
 Gunakan pagination untuk daftar data yang berpotensi panjang. Terapkan filter tanggal, kelas, siswa, dan status melalui query parameter.
 Contoh:
 `GET /api/attendance?date=2026-10-08&class_id=1&status=hadir`

@@ -14,6 +14,7 @@ const routes = [
     { path: '/teacher/classes', name: 'teacher-classes', component: () => import('../views/TeacherClassesView.vue'), meta: { auth: true, roles: ['guru'] } },
     { path: '/history', name: 'history', component: () => import('../views/AttendanceHistoryView.vue'), meta: { auth: true, roles: ['siswa'] } },
     { path: '/reports', name: 'reports', component: () => import('../views/ReportsView.vue'), meta: { auth: true, roles: ['admin'] } },
+    { path: '/attendance-audit-logs', name: 'attendance-audit-logs', component: () => import('../views/AttendanceAuditLogView.vue'), meta: { auth: true, roles: ['guru'] } },
     { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('../views/NotFoundView.vue') },
 ];
 const router = createRouter({

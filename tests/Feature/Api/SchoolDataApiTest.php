@@ -1,15 +1,20 @@
 <?php
+
 namespace Tests\Feature\Api;
+
 use App\Models\Attendance;
 use App\Models\SchoolClass;
 use App\Models\Student;
+use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
+
 class SchoolDataApiTest extends TestCase
 {
     use RefreshDatabase;
+
     public function test_admin_can_create_class_and_student(): void
     {
         $admin = User::factory()->state(['role' => 'admin'])->create();
@@ -33,10 +38,12 @@ class SchoolDataApiTest extends TestCase
             ->assertJsonPath('data.student_number', 'S-001');
         $this->assertModelExists(Student::where('student_number', 'S-001')->firstOrFail());
     }
+
     public function test_returns_401_when_unauthenticated_user_reads_classes(): void
     {
         $this->getJson('/api/classes')->assertUnauthorized();
     }
+
     public function test_non_admin_cannot_manage_school_data(): void
     {
         $teacher = User::factory()->state(['role' => 'guru'])->create();
@@ -44,6 +51,7 @@ class SchoolDataApiTest extends TestCase
             ->postJson('/api/classes', ['name' => 'Kelas Rahasia'])
             ->assertForbidden();
     }
+
     public function test_returns_409_when_class_with_students_is_deleted(): void
     {
         $admin = User::factory()->state(['role' => 'admin'])->create();
@@ -55,6 +63,19 @@ class SchoolDataApiTest extends TestCase
             ->assertJsonPath('message', 'Kelas tidak dapat dihapus selama masih memiliki siswa.');
         $this->assertModelExists($schoolClass);
     }
+
+    public function test_returns_409_when_class_with_subjects_is_deleted(): void
+    {
+        $admin = User::factory()->state(['role' => 'admin'])->create();
+        $schoolClass = SchoolClass::factory()->create();
+        Subject::factory()->for($schoolClass, 'schoolClass')->create();
+        $this->actingAs($admin)
+            ->deleteJson('/api/classes/'.$schoolClass->id)
+            ->assertConflict()
+            ->assertJsonPath('message', 'Kelas tidak dapat dihapus selama masih memiliki mata pelajaran.');
+        $this->assertModelExists($schoolClass);
+    }
+
     public function test_student_crud_validates_unique_student_number_and_preserves_attendance_history(): void
     {
         $admin = User::factory()->state(['role' => 'admin'])->create();
@@ -91,6 +112,7 @@ class SchoolDataApiTest extends TestCase
         $this->assertModelExists($student);
         $this->assertModelExists($attendance);
     }
+
     public function test_returns_404_when_requested_class_does_not_exist(): void
     {
         $admin = User::factory()->state(['role' => 'admin'])->create();
@@ -98,6 +120,7 @@ class SchoolDataApiTest extends TestCase
             ->getJson('/api/classes/999999')
             ->assertNotFound();
     }
+
     public function test_admin_can_delete_empty_class_and_student(): void
     {
         $admin = User::factory()->state(['role' => 'admin'])->create();
@@ -111,6 +134,7 @@ class SchoolDataApiTest extends TestCase
         $this->assertModelMissing($student);
         $this->assertModelMissing($schoolClass);
     }
+
     public function test_returns_422_when_linked_account_is_not_a_student(): void
     {
         $admin = User::factory()->state(['role' => 'admin'])->create();
@@ -127,6 +151,7 @@ class SchoolDataApiTest extends TestCase
             ->assertJsonPath('message', 'Akun yang dipilih harus memiliki role siswa.');
         $this->assertDatabaseCount('students', 0);
     }
+
     public function test_admin_can_create_teacher_account_and_assign_teacher_to_class(): void
     {
         $admin = User::factory()->state(['role' => 'admin'])->create();
@@ -156,6 +181,7 @@ class SchoolDataApiTest extends TestCase
         $this->assertModelMissing($teacher);
         $this->assertModelMissing($teacher->user);
     }
+
     public function test_returns_422_when_duplicate_class_assignment_is_created(): void
     {
         $admin = User::factory()->state(['role' => 'admin'])->create();
@@ -169,6 +195,7 @@ class SchoolDataApiTest extends TestCase
             ->assertJsonPath('errors.class_id.0', 'Penugasan guru pada kelas tersebut sudah ada.');
         $this->assertDatabaseCount('class_teacher', 1);
     }
+
     public function test_returns_403_when_teacher_reads_students_from_unassigned_class(): void
     {
         $teacher = Teacher::factory()->create();

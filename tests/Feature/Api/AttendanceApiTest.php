@@ -2,13 +2,17 @@
 
 namespace Tests\Feature\Api;
 
+use App\Jobs\SendAttendanceNotification;
 use App\Models\Attendance;
+use App\Models\AttendanceSession;
 use App\Models\ClassTeacher;
 use App\Models\SchoolClass;
 use App\Models\Student;
+use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class AttendanceApiTest extends TestCase
@@ -62,6 +66,278 @@ class AttendanceApiTest extends TestCase
             'status' => 'hadir',
         ])->assertForbidden();
         $this->assertDatabaseCount('attendance', 1);
+    }
+
+    public function test_teacher_can_view_full_attendance_sheet_for_assigned_class_and_date(): void
+    {
+        $teacher = Teacher::factory()->create();
+        $schoolClass = SchoolClass::factory()->create();
+        ClassTeacher::factory()->for($schoolClass, 'schoolClass')->for($teacher)->create();
+        $students = Student::factory()
+            ->count(2)
+            ->for($schoolClass, 'schoolClass')
+            ->sequence(
+                ['name' => 'Alya Siswa', 'student_number' => 'NIS-001'],
+                ['name' => 'Bima Siswa', 'student_number' => 'NIS-002'],
+            )
+            ->create();
+        Attendance::factory()->create([
+            'student_id' => $students[0]->id,
+            'recorded_by' => $teacher->user->id,
+            'date' => '2026-10-12',
+            'status' => 'izin',
+        ]);
+
+        $this->actingAs($teacher->user)
+            ->getJson('/api/attendance/sheet?class_id='.$schoolClass->id.'&date=2026-10-12')
+            ->assertOk()
+            ->assertJsonPath('data.class.id', $schoolClass->id)
+            ->assertJsonPath('data.date', '2026-10-12')
+            ->assertJsonCount(2, 'data.students')
+            ->assertJsonPath('data.students.0.name', 'Alya Siswa')
+            ->assertJsonPath('data.students.0.status', 'izin')
+            ->assertJsonPath('data.students.1.name', 'Bima Siswa')
+            ->assertJsonPath('data.students.1.status', null);
+    }
+
+    public function test_teacher_can_save_class_sheet_and_audit_only_new_or_changed_statuses(): void
+    {
+        $teacher = Teacher::factory()->create();
+        $originalRecorder = User::factory()->state(['role' => 'admin'])->create();
+        $schoolClass = SchoolClass::factory()->create();
+        ClassTeacher::factory()->for($schoolClass, 'schoolClass')->for($teacher)->create();
+        $changedStudent = Student::factory()->for($schoolClass, 'schoolClass')->create([
+            'parent_whatsapp_phone' => '+6281234567890',
+        ]);
+        $newStudent = Student::factory()->for($schoolClass, 'schoolClass')->create();
+        $unchangedStudent = Student::factory()->for($schoolClass, 'schoolClass')->create();
+        $existingAttendance = Attendance::factory()->create([
+            'student_id' => $changedStudent->id,
+            'recorded_by' => $originalRecorder->id,
+            'date' => '2026-10-12',
+            'status' => 'hadir',
+        ]);
+        $unchangedAttendance = Attendance::factory()->create([
+            'student_id' => $unchangedStudent->id,
+            'recorded_by' => $originalRecorder->id,
+            'date' => '2026-10-12',
+            'status' => 'hadir',
+        ]);
+        Queue::fake([SendAttendanceNotification::class]);
+
+        $this->actingAs($teacher->user)
+            ->postJson('/api/attendance/sheet', [
+                'class_id' => $schoolClass->id,
+                'date' => '2026-10-12',
+                'attendance' => [
+                    ['student_id' => $changedStudent->id, 'status' => 'sakit'],
+                    ['student_id' => $newStudent->id, 'status' => 'alpa'],
+                    ['student_id' => $unchangedStudent->id, 'status' => 'hadir'],
+                ],
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.saved', 2);
+
+        $this->assertDatabaseCount('attendance', 3);
+        $this->assertDatabaseHas('attendance', [
+            'id' => $existingAttendance->id,
+            'status' => 'sakit',
+            'recorded_by' => $originalRecorder->id,
+        ]);
+        $this->assertDatabaseHas('attendance', [
+            'id' => $unchangedAttendance->id,
+            'status' => 'hadir',
+            'recorded_by' => $originalRecorder->id,
+        ]);
+        $this->assertDatabaseHas('attendance', [
+            'student_id' => $newStudent->id,
+            'recorded_by' => $teacher->user->id,
+            'date' => '2026-10-12',
+            'status' => 'alpa',
+        ]);
+        $this->assertDatabaseCount('attendance_audit_logs', 2);
+        $this->assertDatabaseHas('attendance_audit_logs', [
+            'attendance_id' => $existingAttendance->id,
+            'action' => 'updated',
+            'previous_status' => 'hadir',
+            'new_status' => 'sakit',
+        ]);
+        $this->assertDatabaseHas('attendance_audit_logs', [
+            'student_id' => $newStudent->id,
+            'action' => 'created',
+            'previous_status' => null,
+            'new_status' => 'alpa',
+        ]);
+        Queue::assertPushed(SendAttendanceNotification::class, 1);
+    }
+
+    public function test_teacher_can_record_one_student_for_two_subjects_on_the_same_date(): void
+    {
+        $teacher = Teacher::factory()->create();
+        $schoolClass = SchoolClass::factory()->create();
+        ClassTeacher::factory()->for($schoolClass, 'schoolClass')->for($teacher)->create();
+        $student = Student::factory()->for($schoolClass, 'schoolClass')->create([
+            'parent_whatsapp_phone' => '+6281234567890',
+        ]);
+        $mathematics = Subject::factory()->for($schoolClass, 'schoolClass')->create([
+            'name' => 'Matematika',
+        ]);
+        $science = Subject::factory()->for($schoolClass, 'schoolClass')->create([
+            'name' => 'IPA',
+        ]);
+        Queue::fake([SendAttendanceNotification::class]);
+        $this->actingAs($teacher->user);
+
+        $mathematicsSession = $this->postJson('/api/attendance-sessions', [
+            'subject_id' => $mathematics->id,
+            'date' => '2026-10-12',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.subject.name', 'Matematika')
+            ->assertJsonPath('data.meeting_number', 1)
+            ->json('data.id');
+        $this->getJson('/api/attendance/sheet?attendance_session_id='.$mathematicsSession)
+            ->assertOk()
+            ->assertJsonPath('data.session.subject', 'Matematika')
+            ->assertJsonPath('data.students.0.name', $student->name);
+        $this->postJson('/api/attendance/sheet', [
+            'attendance_session_id' => $mathematicsSession,
+            'attendance' => [
+                ['student_id' => $student->id, 'status' => 'alpa'],
+            ],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.saved', 1);
+
+        $scienceSession = $this->postJson('/api/attendance-sessions', [
+            'subject_id' => $science->id,
+            'date' => '2026-10-12',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.subject.name', 'IPA')
+            ->assertJsonPath('data.meeting_number', 1)
+            ->json('data.id');
+        $this->postJson('/api/attendance/sheet', [
+            'attendance_session_id' => $scienceSession,
+            'attendance' => [
+                ['student_id' => $student->id, 'status' => 'hadir'],
+            ],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.saved', 1);
+
+        $this->assertDatabaseCount('attendance', 2);
+        $this->assertDatabaseHas('attendance', [
+            'student_id' => $student->id,
+            'attendance_session_id' => $mathematicsSession,
+            'date' => '2026-10-12',
+            'status' => 'alpa',
+        ]);
+        $this->assertDatabaseHas('attendance', [
+            'student_id' => $student->id,
+            'attendance_session_id' => $scienceSession,
+            'date' => '2026-10-12',
+            'status' => 'hadir',
+        ]);
+        $this->assertDatabaseHas('attendance_audit_logs', [
+            'student_id' => $student->id,
+            'subject_name' => 'Matematika',
+            'meeting_number' => 1,
+        ]);
+        $this->getJson('/api/attendance?student_id='.$student->id)
+            ->assertOk()
+            ->assertJsonCount(2, 'data.data')
+            ->assertJsonPath('data.data.0.attendance_session.subject.name', 'Matematika')
+            ->assertJsonPath('data.data.1.attendance_session.subject.name', 'IPA');
+        Queue::assertPushed(SendAttendanceNotification::class, 1);
+    }
+
+    public function test_opening_a_subject_on_the_same_date_reuses_its_session(): void
+    {
+        $teacher = Teacher::factory()->create();
+        $schoolClass = SchoolClass::factory()->create();
+        ClassTeacher::factory()->for($schoolClass, 'schoolClass')->for($teacher)->create();
+        $subject = Subject::factory()->for($schoolClass, 'schoolClass')->create();
+        $this->actingAs($teacher->user);
+
+        $firstSession = $this->postJson('/api/attendance-sessions', [
+            'subject_id' => $subject->id,
+            'date' => '2026-10-12',
+        ])->assertOk()->json('data.id');
+        $reopenedSession = $this->postJson('/api/attendance-sessions', [
+            'subject_id' => $subject->id,
+            'date' => '2026-10-12',
+        ])->assertOk()->json('data.id');
+        $nextSession = $this->postJson('/api/attendance-sessions', [
+            'subject_id' => $subject->id,
+            'date' => '2026-10-13',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.meeting_number', 2)
+            ->json('data.id');
+
+        $this->assertSame($firstSession, $reopenedSession);
+        $this->assertDatabaseCount('attendance_sessions', 2);
+        $this->assertModelExists(AttendanceSession::findOrFail($nextSession));
+    }
+
+    public function test_teacher_cannot_open_an_attendance_session_for_an_unassigned_class(): void
+    {
+        $teacher = Teacher::factory()->create();
+        $schoolClass = SchoolClass::factory()->create();
+        $subject = Subject::factory()->for($schoolClass, 'schoolClass')->create();
+
+        $this->actingAs($teacher->user)
+            ->postJson('/api/attendance-sessions', [
+                'subject_id' => $subject->id,
+                'date' => '2026-10-12',
+            ])
+            ->assertForbidden();
+
+        $this->assertDatabaseCount('attendance_sessions', 0);
+    }
+
+    public function test_class_sheet_rejects_an_incomplete_roster_without_saving_attendance(): void
+    {
+        $teacher = Teacher::factory()->create();
+        $schoolClass = SchoolClass::factory()->create();
+        ClassTeacher::factory()->for($schoolClass, 'schoolClass')->for($teacher)->create();
+        Student::factory()->for($schoolClass, 'schoolClass')->create();
+
+        $this->actingAs($teacher->user)
+            ->postJson('/api/attendance/sheet', [
+                'class_id' => $schoolClass->id,
+                'date' => '2026-10-12',
+                'attendance' => [],
+            ])
+            ->assertUnprocessable()
+            ->assertJsonPath(
+                'errors.attendance.0',
+                'Daftar siswa kelas berubah. Muat ulang lembar absensi sebelum menyimpan.',
+            );
+
+        $this->assertDatabaseCount('attendance', 0);
+        $this->assertDatabaseCount('attendance_audit_logs', 0);
+    }
+
+    public function test_teacher_cannot_view_or_save_attendance_sheet_for_unassigned_class(): void
+    {
+        $teacher = Teacher::factory()->create();
+        $schoolClass = SchoolClass::factory()->create();
+        $student = Student::factory()->for($schoolClass, 'schoolClass')->create();
+
+        $this->actingAs($teacher->user)
+            ->getJson('/api/attendance/sheet?class_id='.$schoolClass->id.'&date=2026-10-12')
+            ->assertForbidden();
+        $this->postJson('/api/attendance/sheet', [
+            'class_id' => $schoolClass->id,
+            'date' => '2026-10-12',
+            'attendance' => [
+                ['student_id' => $student->id, 'status' => 'hadir'],
+            ],
+        ])->assertForbidden();
+
+        $this->assertDatabaseCount('attendance', 0);
     }
 
     public function test_student_only_sees_own_attendance_history(): void
