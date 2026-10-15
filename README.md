@@ -61,7 +61,7 @@ Setiap role harus memiliki batasan akses yang jelas. Menyembunyikan tombol pada 
 10. Ringkasan statistik kehadiran.
 11. Validasi data pada frontend dan backend.
 12. Pesan kesalahan dan notifikasi ketika proses berhasil atau gagal.
-13. Antrean notifikasi WhatsApp wali untuk absensi `alpa`, `izin`, atau `sakit` (memerlukan konfigurasi Cloud API).
+13. Riwayat notifikasi WhatsApp wali untuk absensi `alpa`, `izin`, atau `sakit`. Pengiriman pesan dinonaktifkan.
 14. Ekspor ringkasan laporan ke file Excel `.xlsx` dan PDF.
 15. Rekap persentase kehadiran, tren harian, dan siswa yang sering tidak hadir berdasarkan periode pilihan.
 16. Audit log pencatatan, perubahan status, dan penghapusan absensi.
@@ -590,20 +590,12 @@ dengan:
 ```bash
 npm run build
 ```
-Tes notifikasi menggunakan mock/fake untuk pengirim atau HTTP; tes otomatis tidak
-mengirim pesan WhatsApp sungguhan.
-## 19. Notifikasi WhatsApp
-Pengiriman memakai WhatsApp Business Platform Cloud API dan job antrean. Konfigurasi
-berikut dibaca dari `.env` dan tidak boleh ditulis sebagai kredensial di source code:
-`WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_API_VERSION`,
-`WHATSAPP_TEMPLATE_NAME`, dan `WHATSAPP_TEMPLATE_LANGUAGE`.
-
-Provider belum dikonfigurasi pada lingkungan/repository ini; nilai wajib Cloud API
-belum tersedia. Sebelum mengaktifkan pengiriman, siapkan kredensial resmi dan template
-yang disetujui Meta. Template harus menerima parameter nama siswa, status absensi,
-dan tanggal secara berurutan. Pastikan koneksi antrean yang dipilih aman, lalu jalankan
-worker (`php artisan queue:work`) hanya pada lingkungan yang memang boleh mengirim
-pesan. Jangan memakai worker produksi untuk pengujian; gunakan mock/fake.
+Tes notifikasi memastikan riwayat lokal tetap tercatat tanpa mengirim request keluar.
+## 19. Riwayat Notifikasi WhatsApp
+Untuk absensi `alpa`, `izin`, atau `sakit`, aplikasi menyimpan nomor wali dan satu
+riwayat notifikasi per status absensi. Pengiriman pesan melalui WhatsApp Cloud API
+dinonaktifkan; riwayat baru ditandai `not_configured` dan tidak membutuhkan token,
+konfigurasi provider, atau worker antrean.
 ## 20. Instruksi untuk AI di VS Code
 Gunakan ketentuan berikut ketika mengembangkan proyek ini dengan AI di VS Code.
 1. Periksa seluruh struktur folder dan file yang sudah tersedia sebelum mengubah kode.
@@ -633,8 +625,7 @@ Status berikut digunakan untuk memantau progres proyek.
 * [x] Tahap 5: Integrasi frontend dan backend.
 * [x] Pengujian akhir dan perbaikan bug.
 * [x] Dokumentasi instalasi selesai.
-* [x] Implementasi notifikasi WhatsApp Cloud API dan pengujian dengan mock.
-* [ ] Konfigurasi akun/provider WhatsApp dan verifikasi pengiriman nyata.
+* [x] Pencatatan riwayat notifikasi WhatsApp tanpa integrasi provider eksternal.
 * [ ] Repository siap dipublikasikan.
 ## 22. Lisensi
 Lisensi proyek dapat ditentukan setelah kebutuhan publikasi dipastikan. Jika ingin mengizinkan orang lain menggunakan, memodifikasi, dan mendistribusikan kode, pilih lisensi open-source yang sesuai dan sertakan file lisensinya.

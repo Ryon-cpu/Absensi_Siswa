@@ -2,17 +2,16 @@
 
 namespace App\Services;
 
-use App\Jobs\SendAttendanceNotification;
 use App\Models\Attendance;
 use App\Models\AttendanceNotification;
-use Illuminate\Support\Facades\Log;
-use Throwable;
 
 class AttendanceNotificationService
 {
     private const NOTIFIABLE_STATUSES = ['alpa', 'izin', 'sakit'];
 
-    public function queueFor(Attendance $attendance): void
+    private const DISABLED_MESSAGE = 'Pengiriman WhatsApp Cloud API dinonaktifkan.';
+
+    public function recordFor(Attendance $attendance): void
     {
         AttendanceNotification::query()
             ->where('attendance_id', $attendance->id)
@@ -37,40 +36,24 @@ class AttendanceNotificationService
             ],
             [
                 'recipient_phone' => $recipientPhone,
-                'status' => $hasRecipient ? 'pending' : 'failed',
+                'status' => $hasRecipient ? 'not_configured' : 'failed',
                 'last_error' => $hasRecipient
-                    ? null
+                    ? self::DISABLED_MESSAGE
                     : 'Nomor WhatsApp orang tua/wali belum tersedia.',
             ],
         );
 
-        if (! $hasRecipient) {
+        if ($notification->wasRecentlyCreated) {
             return;
         }
 
-        if (! $notification->wasRecentlyCreated) {
-            if ($notification->status !== 'cancelled') {
-                return;
-            }
-
+        if (in_array($notification->status, ['cancelled', 'pending'], true)) {
             $notification->update([
                 'recipient_phone' => $recipientPhone,
-                'status' => 'pending',
-                'last_error' => null,
-            ]);
-        }
-
-        try {
-            SendAttendanceNotification::dispatch($notification->id)->afterCommit();
-        } catch (Throwable $exception) {
-            $notification->update([
-                'status' => 'failed',
-                'last_error' => $exception->getMessage(),
-            ]);
-
-            Log::error('Failed to queue attendance WhatsApp notification.', [
-                'attendance_notification_id' => $notification->id,
-                'exception' => $exception,
+                'status' => $hasRecipient ? 'not_configured' : 'failed',
+                'last_error' => $hasRecipient
+                    ? self::DISABLED_MESSAGE
+                    : 'Nomor WhatsApp orang tua/wali belum tersedia.',
             ]);
         }
     }

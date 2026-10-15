@@ -2,14 +2,12 @@
 
 namespace Tests\Feature\Api;
 
-use App\Jobs\SendAttendanceNotification;
 use App\Models\ClassTeacher;
 use App\Models\SchoolClass;
 use App\Models\Student;
 use App\Models\Teacher;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class AttendanceAuditLogControllerTest extends TestCase
@@ -35,13 +33,11 @@ class AttendanceAuditLogControllerTest extends TestCase
         ])->assertCreated();
         $attendanceId = $created->json('data.id');
 
-        Queue::fake([SendAttendanceNotification::class]);
         $this->putJson('/api/attendance/'.$attendanceId, ['status' => 'alpa'])
             ->assertOk()
             ->assertJsonPath('data.status', 'alpa');
         $this->putJson('/api/attendance/'.$attendanceId, ['status' => 'alpa'])->assertOk();
         $this->deleteJson('/api/attendance/'.$attendanceId)->assertOk();
-        Queue::assertPushed(SendAttendanceNotification::class, 1);
 
         $this->assertDatabaseMissing('attendance', ['id' => $attendanceId]);
         $this->assertDatabaseCount('attendance_audit_logs', 3);

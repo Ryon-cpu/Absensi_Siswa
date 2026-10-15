@@ -2,8 +2,6 @@
 
 namespace App\Providers;
 
-use App\Contracts\WhatsAppMessageSender;
-use App\Services\WhatsAppCloudApiMessageSender;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -12,14 +10,6 @@ use Illuminate\Support\Str;
 
 class AppServiceProvider extends ServiceProvider
 {
-    /**
-     * Register any application services.
-     */
-    public function register(): void
-    {
-        $this->app->bind(WhatsAppMessageSender::class, WhatsAppCloudApiMessageSender::class);
-    }
-
     /**
      * Bootstrap any application services.
      */

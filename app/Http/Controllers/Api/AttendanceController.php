@@ -203,7 +203,7 @@ class AttendanceController extends Controller
         }
 
         foreach ($changedAttendance as $attendance) {
-            $notifications->queueFor($attendance);
+            $notifications->recordFor($attendance);
         }
 
         return response()->json([
@@ -286,7 +286,7 @@ class AttendanceController extends Controller
                 'student_id' => ['Absensi siswa untuk tanggal tersebut sudah tercatat.'],
             ]);
         }
-        $notifications->queueFor($attendance);
+        $notifications->recordFor($attendance);
 
         return response()->json([
             'message' => 'Absensi berhasil dicatat.',
@@ -339,7 +339,7 @@ class AttendanceController extends Controller
             return [$attendance, true];
         });
         if ($statusChanged) {
-            $notifications->queueFor($attendance);
+            $notifications->recordFor($attendance);
         }
 
         return response()->json([

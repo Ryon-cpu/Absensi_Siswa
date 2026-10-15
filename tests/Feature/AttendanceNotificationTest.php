@@ -2,22 +2,16 @@
 
 namespace Tests\Feature;
 
-use App\Contracts\WhatsAppMessageSender;
-use App\Exceptions\WhatsAppApiException;
 use App\Jobs\SendAttendanceNotification;
 use App\Models\Attendance;
 use App\Models\AttendanceNotification;
 use App\Models\SchoolClass;
 use App\Models\Student;
 use App\Models\User;
-use App\Services\WhatsAppCloudApiMessageSender;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
-use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
-use RuntimeException;
 use Tests\TestCase;
 
 class AttendanceNotificationTest extends TestCase
@@ -34,9 +28,10 @@ class AttendanceNotificationTest extends TestCase
     }
 
     #[DataProvider('notifiableStatuses')]
-    public function test_records_one_pending_notification_for_a_notifiable_attendance_status(string $status): void
+    public function test_records_notification_without_sending_for_a_notifiable_attendance_status(string $status): void
     {
-        Queue::fake([SendAttendanceNotification::class]);
+        Queue::fake();
+        Http::preventStrayRequests();
         $admin = User::factory()->state(['role' => 'admin'])->create();
         $student = Student::factory()->create([
             'parent_whatsapp_phone' => '+6281234567890',
@@ -55,15 +50,16 @@ class AttendanceNotificationTest extends TestCase
             'attendance_id' => $attendance->id,
             'trigger_status' => $status,
             'recipient_phone' => '+6281234567890',
-            'status' => 'pending',
+            'status' => 'not_configured',
             'attempts' => 0,
+            'last_error' => 'Pengiriman WhatsApp Cloud API dinonaktifkan.',
         ]);
-        Queue::assertPushed(SendAttendanceNotification::class, fn (SendAttendanceNotification $job): bool => $job->notificationId === $attendance->notifications()->value('id'));
+        Queue::assertNothingPushed();
     }
 
     public function test_does_not_create_a_notification_for_hadir_attendance(): void
     {
-        Queue::fake([SendAttendanceNotification::class]);
+        Queue::fake();
         $admin = User::factory()->state(['role' => 'admin'])->create();
         $student = Student::factory()->create([
             'parent_whatsapp_phone' => '+6281234567890',
@@ -107,9 +103,9 @@ class AttendanceNotificationTest extends TestCase
         ]);
     }
 
-    public function test_attendance_status_updates_create_only_one_notification_per_target_status(): void
+    public function test_attendance_status_updates_create_one_record_per_target_status(): void
     {
-        Queue::fake([SendAttendanceNotification::class]);
+        Queue::fake();
         $admin = User::factory()->state(['role' => 'admin'])->create();
         $student = Student::factory()->create([
             'parent_whatsapp_phone' => '+6281234567890',
@@ -130,18 +126,18 @@ class AttendanceNotificationTest extends TestCase
         $this->assertDatabaseHas('attendance_notifications', [
             'attendance_id' => $attendance->id,
             'trigger_status' => 'sakit',
-            'status' => 'pending',
+            'status' => 'not_configured',
         ]);
         $this->assertDatabaseHas('attendance_notifications', [
             'attendance_id' => $attendance->id,
             'trigger_status' => 'izin',
+            'status' => 'not_configured',
         ]);
-        Queue::assertPushed(SendAttendanceNotification::class, 2);
+        Queue::assertNothingPushed();
     }
 
-    public function test_queued_notification_is_cancelled_if_attendance_status_changes_before_processing(): void
+    public function test_legacy_queued_notification_is_cancelled_if_attendance_status_changes(): void
     {
-        Queue::fake([SendAttendanceNotification::class]);
         $admin = User::factory()->state(['role' => 'admin'])->create();
         $student = Student::factory()->create([
             'parent_whatsapp_phone' => '+6281234567890',
@@ -149,18 +145,15 @@ class AttendanceNotificationTest extends TestCase
         $attendance = Attendance::factory()->create([
             'student_id' => $student->id,
             'recorded_by' => $admin->id,
-            'status' => 'hadir',
+            'status' => 'alpa',
         ]);
-        $this->actingAs($admin)
-            ->putJson('/api/attendance/'.$attendance->id, ['status' => 'alpa'])
-            ->assertOk();
-        $notification = AttendanceNotification::firstOrFail();
-        $this->putJson('/api/attendance/'.$attendance->id, ['status' => 'hadir'])
-            ->assertOk();
-        $sender = Mockery::mock(WhatsAppMessageSender::class);
-        $sender->shouldNotReceive('send');
+        $notification = $this->createPendingNotification('alpa', $attendance);
 
-        (new SendAttendanceNotification($notification->id))->handle($sender);
+        $this->actingAs($admin)
+            ->putJson('/api/attendance/'.$attendance->id, ['status' => 'hadir'])
+            ->assertOk();
+
+        (new SendAttendanceNotification($notification->id))->handle();
 
         $this->assertDatabaseHas('attendance_notifications', [
             'id' => $notification->id,
@@ -200,234 +193,36 @@ class AttendanceNotificationTest extends TestCase
         $this->assertSame('+6281234567890', $student->fresh()->parent_whatsapp_phone);
     }
 
-    public function test_notification_is_marked_sent_only_after_sender_returns_a_provider_message_id(): void
-    {
-        $notification = $this->createPendingNotification('alpa');
-        $sender = Mockery::mock(WhatsAppMessageSender::class);
-        $sender->shouldReceive('send')->once()->andReturn('wamid.test-confirmed');
-
-        (new SendAttendanceNotification($notification->id))->handle($sender);
-
-        $this->assertDatabaseHas('attendance_notifications', [
-            'id' => $notification->id,
-            'status' => 'sent',
-            'provider_message_id' => 'wamid.test-confirmed',
-            'attempts' => 1,
-        ]);
-        $this->assertNotNull($notification->fresh()->sent_at);
-    }
-
-    public function test_notification_is_not_marked_sent_when_whatsapp_is_not_configured(): void
+    public function test_legacy_pending_job_is_not_sent_and_marks_notification_not_configured(): void
     {
         Http::preventStrayRequests();
-        config([
-            'services.whatsapp.access_token' => null,
-            'services.whatsapp.phone_number_id' => null,
-            'services.whatsapp.api_version' => null,
-            'services.whatsapp.template_name' => null,
-            'services.whatsapp.template_language' => 'id',
-        ]);
-        $notification = $this->createPendingNotification('izin');
+        $notification = $this->createPendingNotification('alpa');
 
-        (new SendAttendanceNotification($notification->id))
-            ->handle($this->app->make(WhatsAppMessageSender::class));
+        (new SendAttendanceNotification($notification->id))->handle();
 
         $this->assertDatabaseHas('attendance_notifications', [
             'id' => $notification->id,
             'status' => 'not_configured',
             'provider_message_id' => null,
-            'attempts' => 1,
+            'attempts' => 0,
+            'last_error' => 'Pengiriman WhatsApp Cloud API dinonaktifkan.',
         ]);
     }
 
-    public function test_cloud_api_sends_approved_template_and_returns_provider_message_id(): void
+    private function createPendingNotification(string $status, ?Attendance $attendance = null): AttendanceNotification
     {
-        $notification = $this->createPendingNotification('alpa');
-        config([
-            'services.whatsapp.access_token' => 'test-access-token',
-            'services.whatsapp.phone_number_id' => 'test-phone-number-id',
-            'services.whatsapp.api_version' => 'v22.0',
-            'services.whatsapp.template_name' => 'attendance_alert',
-            'services.whatsapp.template_language' => 'id',
-        ]);
-        Http::preventStrayRequests();
-        Http::fake([
-            'https://graph.facebook.com/v22.0/test-phone-number-id/messages' => Http::response([
-                'messages' => [['id' => 'wamid.cloud-api-confirmed']],
-            ], 200),
-        ]);
-
-        (new SendAttendanceNotification($notification->id))
-            ->handle(app(WhatsAppCloudApiMessageSender::class));
-
-        $this->assertDatabaseHas('attendance_notifications', [
-            'id' => $notification->id,
-            'status' => 'sent',
-            'provider_message_id' => 'wamid.cloud-api-confirmed',
-        ]);
-        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://graph.facebook.com/v22.0/test-phone-number-id/messages'
-            && $request->method() === 'POST'
-            && $request->hasHeader('Authorization', 'Bearer test-access-token')
-            && $request['messaging_product'] === 'whatsapp'
-            && $request['to'] === '6281234567890'
-            && $request['template']['name'] === 'attendance_alert'
-            && $request['template']['components'][0]['parameters'][0]['text'] === $notification->attendance->student->name
-            && $request['template']['components'][0]['parameters'][1]['text'] === 'alpa'
-            && $request['template']['components'][0]['parameters'][2]['text'] === '2026-10-08'
-            && $request['biz_opaque_callback_data'] === (string) $notification->id);
-    }
-
-    public function test_cloud_api_permanent_rejection_is_recorded_without_retrying(): void
-    {
-        $notification = $this->createPendingNotification('izin');
-        config([
-            'services.whatsapp.access_token' => 'test-access-token',
-            'services.whatsapp.phone_number_id' => 'test-phone-number-id',
-            'services.whatsapp.api_version' => 'v22.0',
-            'services.whatsapp.template_name' => 'attendance_alert',
-            'services.whatsapp.template_language' => 'id',
-        ]);
-        Http::preventStrayRequests();
-        Http::fake([
-            'https://graph.facebook.com/v22.0/test-phone-number-id/messages' => Http::response([
-                'error' => [
-                    'message' => 'Template is not approved.',
-                    'code' => 132001,
-                ],
-            ], 400),
-        ]);
-
-        (new SendAttendanceNotification($notification->id))
-            ->handle(app(WhatsAppCloudApiMessageSender::class));
-
-        $this->assertDatabaseHas('attendance_notifications', [
-            'id' => $notification->id,
-            'status' => 'failed',
-            'provider_message_id' => null,
-            'last_error' => 'WhatsApp Cloud API returned HTTP 400 (provider code 132001): Template is not approved.',
-        ]);
-        Http::assertSentCount(1);
-    }
-
-    public function test_cloud_api_server_error_is_marked_retryable(): void
-    {
-        $notification = $this->createPendingNotification('sakit');
-        config([
-            'services.whatsapp.access_token' => 'test-access-token',
-            'services.whatsapp.phone_number_id' => 'test-phone-number-id',
-            'services.whatsapp.api_version' => 'v22.0',
-            'services.whatsapp.template_name' => 'attendance_alert',
-            'services.whatsapp.template_language' => 'id',
-        ]);
-        Http::preventStrayRequests();
-        Http::fake([
-            'https://graph.facebook.com/v22.0/test-phone-number-id/messages' => Http::response([], 503),
-        ]);
-
-        try {
-            app(WhatsAppCloudApiMessageSender::class)->send($notification);
-            $this->fail('Expected the Cloud API server error to be retryable.');
-        } catch (WhatsAppApiException $exception) {
-            $this->assertSame(true, $exception->retryable);
-            $this->assertSame('WhatsApp Cloud API returned HTTP 503: No error details returned.', $exception->getMessage());
+        if ($attendance === null) {
+            $admin = User::factory()->state(['role' => 'admin'])->create();
+            $student = Student::factory()->create([
+                'parent_whatsapp_phone' => '+6281234567890',
+            ]);
+            $attendance = Attendance::factory()->create([
+                'student_id' => $student->id,
+                'recorded_by' => $admin->id,
+                'date' => '2026-10-08',
+                'status' => $status,
+            ]);
         }
-    }
-
-    public function test_cloud_api_success_without_message_id_does_not_mark_notification_sent(): void
-    {
-        $notification = $this->createPendingNotification('sakit');
-        config([
-            'services.whatsapp.access_token' => 'test-access-token',
-            'services.whatsapp.phone_number_id' => 'test-phone-number-id',
-            'services.whatsapp.api_version' => 'v22.0',
-            'services.whatsapp.template_name' => 'attendance_alert',
-            'services.whatsapp.template_language' => 'id',
-        ]);
-        Http::preventStrayRequests();
-        Http::fake([
-            'https://graph.facebook.com/v22.0/test-phone-number-id/messages' => Http::response([
-                'messages' => [],
-            ], 200),
-        ]);
-
-        try {
-            app(WhatsAppCloudApiMessageSender::class)->send($notification);
-            $this->fail('Expected a missing provider message ID to be rejected.');
-        } catch (WhatsAppApiException $exception) {
-            $this->assertSame(true, $exception->retryable);
-        }
-
-        $this->assertDatabaseHas('attendance_notifications', [
-            'id' => $notification->id,
-            'status' => 'pending',
-            'provider_message_id' => null,
-        ]);
-    }
-
-    public function test_empty_provider_confirmation_does_not_mark_notification_sent(): void
-    {
-        $notification = $this->createPendingNotification('alpa');
-        $sender = Mockery::mock(WhatsAppMessageSender::class);
-        $sender->shouldReceive('send')->once()->andReturn('');
-        $job = new SendAttendanceNotification($notification->id);
-        $exception = null;
-        try {
-            $job->handle($sender);
-        } catch (RuntimeException $caught) {
-            $exception = $caught;
-        }
-        $job->failed($exception);
-
-        $this->assertDatabaseHas('attendance_notifications', [
-            'id' => $notification->id,
-            'status' => 'failed',
-            'provider_message_id' => null,
-        ]);
-    }
-
-    public function test_exhausted_sender_failures_are_saved_as_failed(): void
-    {
-        $notification = $this->createPendingNotification('sakit');
-        $sender = Mockery::mock(WhatsAppMessageSender::class);
-        $sender->shouldReceive('send')
-            ->times(3)
-            ->andThrow(new RuntimeException('Provider timeout.'));
-        $job = new SendAttendanceNotification($notification->id);
-        $lastException = null;
-
-        for ($attempt = 0; $attempt < 3; $attempt++) {
-            try {
-                $job->handle($sender);
-            } catch (RuntimeException $exception) {
-                $lastException = $exception;
-            }
-        }
-        $job->failed($lastException);
-
-        $this->assertDatabaseHas('attendance_notifications', [
-            'id' => $notification->id,
-            'status' => 'failed',
-            'last_error' => 'Provider timeout.',
-            'attempts' => 3,
-        ]);
-        $this->assertDatabaseHas('attendance', [
-            'id' => $notification->attendance_id,
-            'status' => 'sakit',
-        ]);
-    }
-
-    private function createPendingNotification(string $status): AttendanceNotification
-    {
-        $admin = User::factory()->state(['role' => 'admin'])->create();
-        $student = Student::factory()->create([
-            'parent_whatsapp_phone' => '+6281234567890',
-        ]);
-        $attendance = Attendance::factory()->create([
-            'student_id' => $student->id,
-            'recorded_by' => $admin->id,
-            'date' => '2026-10-08',
-            'status' => $status,
-        ]);
 
         return AttendanceNotification::create([
             'attendance_id' => $attendance->id,

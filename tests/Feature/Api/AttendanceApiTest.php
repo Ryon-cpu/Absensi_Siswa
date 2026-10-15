@@ -2,7 +2,6 @@
 
 namespace Tests\Feature\Api;
 
-use App\Jobs\SendAttendanceNotification;
 use App\Models\Attendance;
 use App\Models\AttendanceSession;
 use App\Models\ClassTeacher;
@@ -12,7 +11,6 @@ use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class AttendanceApiTest extends TestCase
@@ -123,8 +121,6 @@ class AttendanceApiTest extends TestCase
             'date' => '2026-10-12',
             'status' => 'hadir',
         ]);
-        Queue::fake([SendAttendanceNotification::class]);
-
         $this->actingAs($teacher->user)
             ->postJson('/api/attendance/sheet', [
                 'class_id' => $schoolClass->id,
@@ -168,7 +164,6 @@ class AttendanceApiTest extends TestCase
             'previous_status' => null,
             'new_status' => 'alpa',
         ]);
-        Queue::assertPushed(SendAttendanceNotification::class, 1);
     }
 
     public function test_teacher_can_record_one_student_for_two_subjects_on_the_same_date(): void
@@ -185,7 +180,6 @@ class AttendanceApiTest extends TestCase
         $science = Subject::factory()->for($schoolClass, 'schoolClass')->create([
             'name' => 'IPA',
         ]);
-        Queue::fake([SendAttendanceNotification::class]);
         $this->actingAs($teacher->user);
 
         $mathematicsSession = $this->postJson('/api/attendance-sessions', [
@@ -249,7 +243,6 @@ class AttendanceApiTest extends TestCase
             ->assertJsonCount(2, 'data.data')
             ->assertJsonPath('data.data.0.attendance_session.subject.name', 'Matematika')
             ->assertJsonPath('data.data.1.attendance_session.subject.name', 'IPA');
-        Queue::assertPushed(SendAttendanceNotification::class, 1);
     }
 
     public function test_opening_a_subject_on_the_same_date_reuses_its_session(): void

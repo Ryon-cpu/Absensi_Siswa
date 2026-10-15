@@ -2,17 +2,16 @@
 
 namespace App\Jobs;
 
-use App\Contracts\WhatsAppMessageSender;
-use App\Exceptions\WhatsAppApiException;
-use App\Exceptions\WhatsAppNotConfiguredException;
 use App\Models\AttendanceNotification;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
-use RuntimeException;
 use Throwable;
 
+/**
+ * Safely finalizes jobs queued before WhatsApp delivery was disabled.
+ */
 class SendAttendanceNotification implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
@@ -31,7 +30,7 @@ class SendAttendanceNotification implements ShouldBeUnique, ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(WhatsAppMessageSender $sender): void
+    public function handle(): void
     {
         $notification = AttendanceNotification::findOrFail($this->notificationId);
         if ($notification->status !== 'pending') {
@@ -48,7 +47,6 @@ class SendAttendanceNotification implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        $notification->increment('attempts');
         if ($notification->recipient_phone === null) {
             $notification->update([
                 'status' => 'failed',
@@ -57,45 +55,10 @@ class SendAttendanceNotification implements ShouldBeUnique, ShouldQueue
 
             return;
         }
-        try {
-            $providerMessageId = $sender->send($notification);
-        } catch (WhatsAppApiException $exception) {
-            if ($exception->retryable) {
-                throw $exception;
-            }
 
-            $notification->update([
-                'status' => 'failed',
-                'last_error' => $exception->getMessage(),
-            ]);
-
-            Log::error('WhatsApp notification was rejected by the provider.', [
-                'attendance_notification_id' => $notification->id,
-                'error' => $exception->getMessage(),
-            ]);
-
-            return;
-        } catch (WhatsAppNotConfiguredException $exception) {
-            $notification->update([
-                'status' => 'not_configured',
-                'last_error' => $exception->getMessage(),
-            ]);
-
-            Log::warning('WhatsApp notification was not sent because configuration is unavailable.', [
-                'attendance_notification_id' => $notification->id,
-                'error' => $exception->getMessage(),
-            ]);
-
-            return;
-        }
-        if (trim($providerMessageId) === '') {
-            throw new RuntimeException('WhatsApp provider did not confirm the message.');
-        }
         $notification->update([
-            'status' => 'sent',
-            'provider_message_id' => $providerMessageId,
-            'sent_at' => now(),
-            'last_error' => null,
+            'status' => 'not_configured',
+            'last_error' => 'Pengiriman WhatsApp Cloud API dinonaktifkan.',
         ]);
     }
 
@@ -104,11 +67,11 @@ class SendAttendanceNotification implements ShouldBeUnique, ShouldQueue
         AttendanceNotification::whereKey($this->notificationId)
             ->where('status', 'pending')
             ->update([
-                'status' => 'failed',
-                'last_error' => $exception?->getMessage() ?? 'WhatsApp delivery failed.',
+                'status' => 'not_configured',
+                'last_error' => $exception?->getMessage() ?? 'Pengiriman WhatsApp Cloud API dinonaktifkan.',
             ]);
 
-        Log::error('WhatsApp notification delivery failed after all attempts.', [
+        Log::error('Legacy WhatsApp notification job failed after all attempts.', [
             'attendance_notification_id' => $this->notificationId,
             'error' => $exception?->getMessage(),
         ]);
